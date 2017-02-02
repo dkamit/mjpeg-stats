@@ -40,7 +40,7 @@ class AllStatsHandler(CementBaseHandler):
 
     def calculate_stats(self, app):
         args = app.pargs
-        headers = ['DATE', 'Bit Rate (Mbps)', 'Frame Rate(Fps)', 'Dropped Frame Count', 'Dropped Frames']
+        headers = ['DATE', 'Bit Rate (Mbps)', 'Frame Rate(Fps)', 'Approx Latency(Milli Seconds)', 'Dropped Frame Count', 'Dropped Frames']
         uid = str(uuid.uuid1())
         if not os.path.exists('tmp'):
             os.makedirs('tmp/')
@@ -57,6 +57,7 @@ class AllStatsHandler(CementBaseHandler):
         self.printTo(stats_file,app,"|".join(headers))
         data_read = ''
         i=0
+        lat = 0
         frame_numbers = []
         for chunk in req:
             end_time = time.time()
@@ -69,6 +70,9 @@ class AllStatsHandler(CementBaseHandler):
                 if m:
                     i=m.group(1)
                     frame_numbers.append(int(i))
+                m = re.search(r'\W*Prysm-Timestamp: (\d+)', data_read)
+                if m:
+                    lat += (time.time()*1000-int(m.group(1)))
                 with open('tmp/'+uid+"/" + str(i) + '.txt','a') as f:
                     f.write(data_read)
                     data_read = ''
@@ -80,13 +84,16 @@ class AllStatsHandler(CementBaseHandler):
                 end_frame = int(frame_numbers[-1])
                 expected_frames = range(start_frame, end_frame + 1)
                 dropped = list(set(expected_frames) - set(frame_numbers))
+                avg_lat = lat/self.fps
                 start_time = end_time
                 self.read_bytes = 0
                 self.fps = 0
+                lat = 0
                 frame_numbers = []
-                self.printTo(stats_file, app, "{0}|{1}|{2}|{3}|{4}".format(time.ctime(),bitrate, framerate, len(dropped), dropped))
-                app.render([[time.ctime(),bitrate,framerate,len(dropped), dropped]], headers = headers)
-
+                self.printTo(stats_file, app, "{0}|{1}|{2}|{3}|{4}|{5}".format(time.ctime(),bitrate, framerate,
+                 avg_lat, len(dropped), dropped))
+                app.render([[time.ctime(),bitrate,framerate,avg_lat,len(dropped), dropped]], headers = headers)
                 if end_time >=time_to_exit:
                     print("Exiting ...")
                     sys.exit(0)
+
