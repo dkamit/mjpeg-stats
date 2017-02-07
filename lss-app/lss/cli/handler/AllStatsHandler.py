@@ -24,18 +24,21 @@ class AllStatsHandler(CementBaseHandler):
 
     def derive_url(self, user, password, environment, cam_id):
         auth_url = "https://{0}.synthesize.com/api/v1/users/authenticate/{1}".format(environment, user)
-        req = urllib2.Request(auth_url, password, {'Content-Type': 'application/json'})
-        f = urllib2.urlopen(req)
-        response = f.read()
-        f.close()
+        response = requests.post(auth_url, data='\'' + password + '\'', headers={'Content-Type': 'application/json'}).content
         parsed_json = json.loads(response)
         token = parsed_json['Payload']['Token']
+        if token is None:
+            print "Enter valid username and password"
+            sys.exit(1)
         request_headers = {'Content-Type': 'application/json', 'Authorization': 'Bearer '+ token}
         tuner_convert_url = "https://{0}.synthesize.com/streaming/api/v1/livestream/convert/channel/{1}".format(environment, cam_id)
         r = requests.get(tuner_convert_url, headers=request_headers)
         convertedId = json.loads(r.text)['convertedId']
         channel_url = "https://{0}.synthesize.com/streaming/api/v1/livestream/tuner/channel/{1}".format(environment, convertedId)
         r = json.loads(requests.get(channel_url, headers=request_headers).text)
+        if r['streamURL'] is None:
+            print "Enter a valid cam id"
+            sys.exit(1)
         return "{0}&auth=Bearer%20{1}".format(r['streamURL'], r['token'])
 
     def calculate_stats(self, app):
