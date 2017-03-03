@@ -7,7 +7,7 @@ import sys
 import json
 import requests
 from cement.core.handler import CementBaseHandler
-
+import ConfigParser
 
 class AllStatsHandler(CementBaseHandler):
     class Meta:
@@ -41,9 +41,42 @@ class AllStatsHandler(CementBaseHandler):
             sys.exit(1)
         return "{0}&auth=Bearer%20{1}".format(r['streamURL'], r['token'])
 
+    def get_quality_by_bitrate(self, configured_bitrate, bitrate):
+        if configured_bitrate * 3 < bitrate:
+            return 'High Quality Stream'
+        elif configured_bitrate * 2 < bitrate:
+            return 'Quality Stream'
+        elif configured_bitrate * 1 < bitrate:
+            return 'Acceptable Quality'
+        else:
+            return 'Low Quality'
+
+    def get_quality_by_framerate(self, configured_fps, framerate, deviance):
+        if (configured_fps - configured_fps * deviance/100 < framerate) and (configured_fps + configured_fps * deviance/100 > framerate):
+            return 'Good frame rate'
+        else:
+            return 'Low frame rate'
+
     def calculate_stats(self, app):
+        try:
+            configured_fps=app.config.getint('lss','framerate')
+        except ConfigParser.NoOptionError:
+            print("Please update .lss.conf in your home directory for framerate configuration using default 10 for now")
+            configured_fps = 10
+        try:
+            configured_bitrate=app.config.getint('lss','bitrate')
+        except ConfigParser.NoOptionError:
+            print("Please update .lss.conf in your home directory for bitrate configuration using default 3 for now")
+            configured_bitrate=3
+
+        try:
+            deviance=app.config.getint('lss','deviance')
+        except ConfigParser.NoOptionError:
+            print("Please update .lss.conf in your home directory for deviance configuration using default 20 percent for now")
+            deviance=20
+
         args = app.pargs
-        headers = ['DATE', 'Bit Rate (Mbps)', 'Frame Rate(Fps)', 'Approx Latency(Milli Seconds)', 'Dropped Frame Count', 'Dropped Frames']
+        headers = ['DATE', 'Bit Rate (Mbps)', 'Frame Rate(Fps)', 'Approx Latency(Milli Seconds)', 'Dropped Frame Count', 'Dropped Frames', 'Test Status']
         uid = str(uuid.uuid1())
         if not os.path.exists('tmp'):
             os.makedirs('tmp/')
@@ -93,10 +126,16 @@ class AllStatsHandler(CementBaseHandler):
                 self.fps = 0
                 lat = 0
                 frame_numbers = []
+
+                bitrate_quality = self.get_quality_by_bitrate(configured_bitrate, bitrate)
+                framerate_quality = self.get_quality_by_framerate(configured_fps, framerate, deviance)
+
+                final_result = bitrate_quality + ' with ' + framerate_quality
+
                 self.printTo(stats_file, app, "{0}|{1}|{2}|{3}|{4}|{5}".format(time.ctime(),bitrate, framerate,
                  avg_lat, len(dropped), dropped))
-                app.render([[time.ctime(),bitrate,framerate,avg_lat,len(dropped), dropped]], headers = headers)
+
+                app.render([[time.ctime(),bitrate,framerate,avg_lat,len(dropped), dropped, final_result]], headers = headers)
                 if end_time >=time_to_exit:
                     print("Exiting ...")
                     sys.exit(0)
-
