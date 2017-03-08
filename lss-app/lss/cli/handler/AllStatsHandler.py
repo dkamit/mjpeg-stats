@@ -43,19 +43,23 @@ class AllStatsHandler(CementBaseHandler):
 
     def get_quality_by_bitrate(self, configured_bitrate, bitrate):
         if configured_bitrate * 3 < bitrate:
-            return 'High Quality Stream'
+            return 'High Quality Stream', True
         elif configured_bitrate * 2 < bitrate:
-            return 'Quality Stream'
+            return 'Quality Stream', True
         elif configured_bitrate * 1 < bitrate:
-            return 'Acceptable Quality'
+            return 'Acceptable Quality', False
         else:
-            return 'Low Quality'
+            return 'Low Quality', False
 
     def get_quality_by_framerate(self, configured_fps, framerate, deviance):
         if (configured_fps - configured_fps * deviance/100 < framerate) and (configured_fps + configured_fps * deviance/100 > framerate):
-            return 'Good frame rate'
+            return 'Good frame rate', True
         else:
-            return 'Low frame rate'
+            return 'Low frame rate', False
+
+    def calculate_jitter(self, frame_delays):
+        diffs = [j-i for i, j in zip(frame_delays[:-1], frame_delays[1:])]
+        return sum(diffs)/len(diffs)
 
     def calculate_stats(self, app):
         try:
@@ -76,7 +80,7 @@ class AllStatsHandler(CementBaseHandler):
             deviance=20
 
         args = app.pargs
-        headers = ['DATE', 'Bit Rate (Mbps)', 'Frame Rate(Fps)', 'Approx Latency(Milli Seconds)', 'Dropped Frame Count', 'Dropped Frames', 'Test Status']
+        headers = ['DATE', 'Bit Rate (Mbps)', 'Frame Rate(Fps)', 'Approx Latency(Milli Seconds)', 'Dropped Frame Count', 'Dropped Frames', 'Jitter', 'Test Status']
         uid = str(uuid.uuid1())
         if not os.path.exists('tmp'):
             os.makedirs('tmp/')
@@ -95,6 +99,8 @@ class AllStatsHandler(CementBaseHandler):
         i=0
         lat = 0
         frame_numbers = []
+        frame_delays = [0]
+        itrn = 0
         for chunk in req:
             end_time = time.time()
             data_read += chunk
@@ -113,6 +119,7 @@ class AllStatsHandler(CementBaseHandler):
                     f.write(data_read)
                     data_read = ''
             if (end_time - start_time) >= int(args.interval):
+                itrn = itrn + 1
                 bitrate = (self.read_bytes * 8) / ( int(args.interval) * 1024.0 * 1024.0 )
                 framerate = self.fps * 1.0/int(args.interval)
                 frame_numbers.sort()
@@ -120,6 +127,9 @@ class AllStatsHandler(CementBaseHandler):
                 end_frame = int(frame_numbers[-1])
                 expected_frames = range(start_frame, end_frame + 1)
                 dropped = list(set(expected_frames) - set(frame_numbers))
+                time_per_frame = (end_time - start_time) / framerate
+                frame_delays.append(time_per_frame)
+                jitter = self.calculate_jitter(frame_delays)
                 avg_lat = lat/self.fps
                 start_time = end_time
                 self.read_bytes = 0
@@ -127,15 +137,19 @@ class AllStatsHandler(CementBaseHandler):
                 lat = 0
                 frame_numbers = []
 
-                bitrate_quality = self.get_quality_by_bitrate(configured_bitrate, bitrate)
-                framerate_quality = self.get_quality_by_framerate(configured_fps, framerate, deviance)
+                bitrate_quality, pass_b = self.get_quality_by_bitrate(configured_bitrate, bitrate)
+                framerate_quality, pass_f = self.get_quality_by_framerate(configured_fps, framerate, deviance)
 
                 final_result = bitrate_quality + ' with ' + framerate_quality
+                if pass_f and pass_b:
+                    final_result = 'pass ' + final_result
+                else:
+                    final_result = 'fail ' + final_result
 
-                self.printTo(stats_file, app, "{0}|{1}|{2}|{3}|{4}|{5}".format(time.ctime(),bitrate, framerate,
-                 avg_lat, len(dropped), dropped))
+                self.printTo(stats_file, app, "{0}|{1}|{2}|{3}|{4}|{5}|{6}|{7}".format(time.ctime(),bitrate, framerate,
+                 avg_lat, len(dropped), dropped, jitter, final_result))
 
-                app.render([[time.ctime(),bitrate,framerate,avg_lat,len(dropped), dropped, final_result]], headers = headers)
+                app.render([[time.ctime(),bitrate,framerate,avg_lat,len(dropped), dropped, jitter, final_result]], headers = headers)
                 if end_time >=time_to_exit:
                     print("Exiting ...")
                     sys.exit(0)
